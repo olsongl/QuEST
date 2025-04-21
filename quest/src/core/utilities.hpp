@@ -287,8 +287,6 @@ bool util_isStrictlyNonNegative(DiagMatr2 matrix);
 bool util_isStrictlyNonNegative(DiagMatr  matrix);
 bool util_isStrictlyNonNegative(FullStateDiagMatr matrix);
 
-
-
 /*
  * PAULI STR SUM PROPERTIES
  */

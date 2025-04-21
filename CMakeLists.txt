@@ -533,3 +533,15 @@ install(EXPORT QuESTTargets
         NAMESPACE QuEST::
         DESTINATION "${QuEST_INSTALL_CONFIGDIR}"
 )
+
+# Add the benchmark executable
+add_executable(benchmark_validation benchmarks/benchmark_validation.cpp)
+
+# Link the benchmark executable to the QuEST library
+target_link_libraries(benchmark_validation PRIVATE QuEST::QuEST)
+
+# Include directories for the benchmark
+target_include_directories(benchmark_validation PRIVATE
+    ${CMAKE_SOURCE_DIR}/quest/include
+    ${CMAKE_SOURCE_DIR}/quest/src/core
+)
