@@ -448,6 +448,71 @@
      return true;
  }
  
+
+
+
+ __device__ bool isApprox_device(cuDoubleComplex a, cuDoubleComplex b, double eps) {
+    return fabs(cuCreal(a) - cuCreal(b)) <= eps && fabs(cuCimag(a) - cuCimag(b)) <= eps;
+}
+
+__global__ void unitarityKernel(cuDoubleComplex* mat, int dim, double eps, bool* result) {
+    int r = blockIdx.y * blockDim.y + threadIdx.y;
+    int c = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (r < dim && c < dim) {
+        cuDoubleComplex sum = make_cuDoubleComplex(0.0, 0.0);
+        for (int i = 0; i < dim; ++i) {
+            cuDoubleComplex m1 = mat[r * dim + i];
+            cuDoubleComplex m2 = cuConj(mat[c * dim + i]);
+            sum = cuCadd(sum, cuCmul(m1, m2));
+        }
+
+        cuDoubleComplex expected = make_cuDoubleComplex((r == c) ? 1.0 : 0.0, 0.0);
+        if (!isApprox_device(sum, expected, eps)) {
+            result[r * dim + c] = false;
+        } else {
+            result[r * dim + c] = true;
+        }
+    }
+}
+
+bool getUnitarity_cuda(cuDoubleComplex* h_matrix, int dim, double eps) {
+    size_t bytes = dim * dim * sizeof(cuDoubleComplex);
+
+    // Allocate device memory
+    cuDoubleComplex* d_matrix;
+    bool* d_result;
+    bool* h_result = new bool[dim * dim];
+    cudaMalloc(&d_matrix, bytes);
+    cudaMalloc(&d_result, dim * dim * sizeof(bool));
+
+    // Copy matrix to device
+    cudaMemcpy(d_matrix, h_matrix, bytes, cudaMemcpyHostToDevice);
+
+    // Launch kernel
+    dim3 threads(16, 16);
+    dim3 blocks((dim + 15) / 16, (dim + 15) / 16);
+    unitarityKernel<<<blocks, threads>>>(d_matrix, dim, eps, d_result);
+
+    // Copy result back to host
+    cudaMemcpy(h_result, d_result, dim * dim * sizeof(bool), cudaMemcpyDeviceToHost);
+
+    // Check results
+    bool isUnitary = true;
+    for (int i = 0; i < dim * dim; ++i) {
+        if (!h_result[i]) {
+            isUnitary = false;
+            break;
+        }
+    }
+
+    // Cleanup
+    delete[] h_result;
+    cudaFree(d_matrix);
+    cudaFree(d_result);
+
+    return isUnitary;
+}
  
  // type T can be qcomp** or qcomp*[]
  template <typename T>
@@ -495,6 +560,48 @@
  
      return true;
  }
+
+ __device__ bool isApprox_devicediag(double a, double b, double eps) {
+    return fabs(a - b) <= eps;
+}
+
+__global__ void checkUnitarityKerneldiag(const cuDoubleComplex* diags, qindex dim, double eps, bool* resultFlags) {
+    qindex idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < dim) {
+        double magnitude = cuCabs(diags[idx]);
+        resultFlags[idx] = isApprox_devicediag(magnitude, 1.0, eps);
+    }
+}
+
+bool getUnitarity_cuda(cuDoubleComplex* d_diags, qindex dim, double eps) {
+    // Allocate device memory for result flags
+    bool* d_flags;
+    cudaMalloc(&d_flags, sizeof(bool) * dim);
+
+    // Launch kernel
+    int threadsPerBlock = 256;
+    int blocks = (dim + threadsPerBlock - 1) / threadsPerBlock;
+    checkUnitarityKerneldiag<<<blocks, threadsPerBlock>>>(d_diags, dim, eps, d_flags);
+
+    // Copy flags back to host
+    bool* h_flags = new bool[dim];
+    cudaMemcpy(h_flags, d_flags, sizeof(bool) * dim, cudaMemcpyDeviceToHost);
+
+    // Evaluate result
+    bool isUnitary = true;
+    for (qindex i = 0; i < dim; i++) {
+        if (!h_flags[i]) {
+            isUnitary = false;
+            break;
+        }
+    }
+
+    // Cleanup
+    delete[] h_flags;
+    cudaFree(d_flags);
+
+    return isUnitary;
+}
  
  // diagonal version doesn't need templating because array decays to pointer, yay!
  bool getUnitarityButFaster(qcomp* diags, qindex dim, qreal eps) {
@@ -936,6 +1043,44 @@ bool getHermiticitybutFaster(T elems, qindex dim, qreal eps) {
      // always true by this point
      return *(map.isApproxCPTP);
  }
+
+
+
+ bool util_isCPTPbutFaster(KrausMap map, qreal eps) {
+    assert_utilsGivenNonZeroEpsilon(eps);
+
+    if (*(map.isApproxCPTP) != validate_STRUCT_PROPERTY_UNKNOWN_FLAG)
+        return *(map.isApproxCPTP);
+
+    bool isCPTP = true;
+
+    #pragma omp parallel for collapse(2) shared(isCPTP)
+    for (qindex r = 0; r < map.numRows; r++) {
+        for (qindex c = 0; c < map.numRows; c++) {
+            if (!isCPTP) continue;
+
+            qcomp elem = 0;
+            for (int n = 0; n < map.numMatrices; n++) {
+                for (qindex k = 0; k < map.numRows; k++) {
+                    elem += std::conj(map.matrices[n][k][r]) * map.matrices[n][k][c];
+                }
+            }
+
+            qreal distSquared = std::norm(elem - (r == c));
+            if (distSquared > eps) {
+                #pragma omp critical
+                {
+                    isCPTP = false;
+                }
+            }
+        }
+    }
+
+    *(map.isApproxCPTP) = isCPTP;
+    return isCPTP;
+}
+
+
  
  // T can be qcomp*** or vector<vector<vector<qcomp>>>
  template <typename T> 
