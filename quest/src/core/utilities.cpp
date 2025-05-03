@@ -139,6 +139,7 @@ int util_getRankWithQubitFlipped(int prefixKetQubit, Qureg qureg)
 int util_getRankWithQubitsFlipped(vector<int> prefixQubits, Qureg qureg)
 {
 
+    
     int rank = qureg.rank;
     for (int qubit : prefixQubits)
         rank = flipBit(rank, util_getPrefixInd(qubit, qureg));
@@ -481,47 +482,11 @@ __global__ void unitarityKernel(cuDoubleComplex* mat, int dim, double eps, bool*
     }
 }
 
-bool getUnitarity_cuda(cuDoubleComplex* h_matrix, int dim, double eps) {
-    size_t bytes = dim * dim * sizeof(cuDoubleComplex);
 
-    // Allocate device memory
-    cuDoubleComplex* d_matrix;
-    bool* d_result;
-    bool* h_result = new bool[dim * dim];
-    cudaMalloc(&d_matrix, bytes);
-    cudaMalloc(&d_result, dim * dim * sizeof(bool));
-
-    // Copy matrix to device
-    cudaMemcpy(d_matrix, h_matrix, bytes, cudaMemcpyHostToDevice);
-
-    // Launch kernel
-    dim3 threads(16, 16);
-    dim3 blocks((dim + 15) / 16, (dim + 15) / 16);
-    unitarityKernel<<<blocks, threads>>>(d_matrix, dim, eps, d_result);
-
-    // Copy result back to host
-    cudaMemcpy(h_result, d_result, dim * dim * sizeof(bool), cudaMemcpyDeviceToHost);
-
-    // Check results
-    bool isUnitary = true;
-    for (int i = 0; i < dim * dim; ++i) {
-        if (!h_result[i]) {
-            isUnitary = false;
-            break;
-        }
-    }
-
-    // Cleanup
-    delete[] h_result;
-    cudaFree(d_matrix);
-    cudaFree(d_result);
-
-    return isUnitary;
-}
 
 // type T can be qcomp** or qcomp*[]
 template <typename T>
-bool getUnitarityButFaster(T elems, qindex dim, qreal eps)
+bool getUnitarity(T elems, qindex dim, qreal eps)
 {
     assert_utilsGivenNonZeroEpsilon(eps);
 
@@ -552,34 +517,34 @@ bool getUnitarityButFaster(T elems, qindex dim, qreal eps)
     return true;
 }
 
-// type T can be qcomp** or qcomp*[]
-template <typename T>
-bool getUnitarity(T elems, qindex dim, qreal eps)
-{
-    //  assert_utilsGivenNonZeroEpsilon(eps);
+// // type T can be qcomp** or qcomp*[]
+// template <typename T>
+// bool getUnitarity(T elems, qindex dim, qreal eps)
+// {
+//     //  assert_utilsGivenNonZeroEpsilon(eps);
 
-    //  /// @todo
-    //  /// consider multithreading or GPU-accelerating this
-    //  /// when caller is big and e.g. has GPU memory
-    return getUnitarityButFaster(elems, dim, eps);
+//     //  /// @todo
+//     //  /// consider multithreading or GPU-accelerating this
+//     //  /// when caller is big and e.g. has GPU memory
 
-    //  // check m * dagger(m) == identity
-    //  for (qindex r=0; r<dim; r++) {
-    //      for (qindex c=0; c<dim; c++) {
 
-    //          // compute m[r,...] * dagger(m)[...,c]
-    //          qcomp elem = 0;
-    //          for (qindex i=0; i<dim; i++)
-    //              elem += elems[r][i] * std::conj(elems[c][i]);
+//     //  // check m * dagger(m) == identity
+//     //  for (qindex r=0; r<dim; r++) {
+//     //      for (qindex c=0; c<dim; c++) {
 
-    //          // check if further than epsilon from identity[r,c]
-    //          if (!isApprox(elem, qcomp(r==c,0), eps))
-    //              return false;
-    //      }
-    //  }
+//     //          // compute m[r,...] * dagger(m)[...,c]
+//     //          qcomp elem = 0;
+//     //          for (qindex i=0; i<dim; i++)
+//     //              elem += elems[r][i] * std::conj(elems[c][i]);
 
-    //  return true;
-}
+//     //          // check if further than epsilon from identity[r,c]
+//     //          if (!isApprox(elem, qcomp(r==c,0), eps))
+//     //              return false;
+//     //      }
+//     //  }
+
+//     //  return true;
+// }
 
 __device__ bool isApprox_devicediag(double a, double b, double eps) {
     return fabs(a - b) <= eps;
@@ -593,38 +558,10 @@ __global__ void checkUnitarityKerneldiag(const cuDoubleComplex* diags, qindex di
     }
 }
 
-bool getUnitarity_cuda(cuDoubleComplex* d_diags, qindex dim, double eps) {
-    // Allocate device memory for result flags
-    bool* d_flags;
-    cudaMalloc(&d_flags, sizeof(bool) * dim);
 
-    // Launch kernel
-    int threadsPerBlock = 256;
-    int blocks = (dim + threadsPerBlock - 1) / threadsPerBlock;
-    checkUnitarityKerneldiag<<<blocks, threadsPerBlock>>>(d_diags, dim, eps, d_flags);
-
-    // Copy flags back to host
-    bool* h_flags = new bool[dim];
-    cudaMemcpy(h_flags, d_flags, sizeof(bool) * dim, cudaMemcpyDeviceToHost);
-
-    // Evaluate result
-    bool isUnitary = true;
-    for (qindex i = 0; i < dim; i++) {
-        if (!h_flags[i]) {
-            isUnitary = false;
-            break;
-        }
-    }
-
-    // Cleanup
-    delete[] h_flags;
-    cudaFree(d_flags);
-
-    return isUnitary;
-}
 
 // diagonal version doesn't need templating because array decays to pointer, yay!
-bool getUnitarityButFaster(qcomp *diags, qindex dim, qreal eps)
+bool getUnitarity(qcomp *diags, qindex dim, qreal eps)
 {
     assert_utilsGivenNonZeroEpsilon(eps);
 
@@ -643,23 +580,23 @@ bool getUnitarityButFaster(qcomp *diags, qindex dim, qreal eps)
     return isUnitary;
 }
 
-// diagonal version doesn't need templating because array decays to pointer, yay!
-bool getUnitarity(qcomp *diags, qindex dim, qreal eps)
-{
-    //  assert_utilsGivenNonZeroEpsilon(eps);
+// // diagonal version doesn't need templating because array decays to pointer, yay!
+// bool getUnitarity(qcomp *diags, qindex dim, qreal eps)
+// {
+//     //  assert_utilsGivenNonZeroEpsilon(eps);
 
-    //  /// @todo
-    //  /// consider multithreading or GPU-accelerating this
-    //  /// when caller is big and e.g. has GPU memory
-    return getUnitarityButFaster(diags, dim, eps);
+//     //  /// @todo
+//     //  /// consider multithreading or GPU-accelerating this
+//     //  /// when caller is big and e.g. has GPU memory
+//     return getUnitarityButFaster(diags, dim, eps);
 
-    //  // check every element has unit magnitude
-    //  for (qindex i=0; i<dim; i++)
-    //      if (!isApprox(std::abs(diags[i]), 1, eps))
-    //          return false;
+//     //  // check every element has unit magnitude
+//     //  for (qindex i=0; i<dim; i++)
+//     //      if (!isApprox(std::abs(diags[i]), 1, eps))
+//     //          return false;
 
-    //  return true;
-}
+//     //  return true;
+// }
 
 // unitarity of fixed-size matrices is always computed afresh
 bool util_isUnitary(CompMatr1 m, qreal eps) { return getUnitarity(m.elems, m.numRows, eps); }
@@ -709,7 +646,7 @@ bool util_isUnitary(FullStateDiagMatr m, qreal eps)
 
 // type T can be qcomp** or qcomp*[]
 template <typename T>
-bool getHermiticitybutFaster(T elems, qindex dim, qreal eps)
+bool getHermiticity(T elems, qindex dim, qreal eps)
 {
     assert_utilsGivenNonZeroEpsilon(eps);
 
@@ -737,27 +674,27 @@ bool getHermiticitybutFaster(T elems, qindex dim, qreal eps)
     return isHermitian;
 }
 
-// type T can be qcomp** or qcomp*[]
-template <typename T>
-bool getHermiticity(T elems, qindex dim, qreal eps)
-{
-    //  assert_utilsGivenNonZeroEpsilon(eps);
+// // type T can be qcomp** or qcomp*[]
+// template <typename T>
+// bool getHermiticity(T elems, qindex dim, qreal eps)
+// {
+//     //  assert_utilsGivenNonZeroEpsilon(eps);
 
-    /// @todo
-    /// consider multithreading or GPU-accelerating this
-    /// when caller is big and e.g. has GPU memory
-    return getHermiticitybutFaster(elems, dim, eps);
+//     /// @todo
+//     /// consider multithreading or GPU-accelerating this
+//     /// when caller is big and e.g. has GPU memory
+//     return getHermiticitybutFaster(elems, dim, eps);
 
-    // check adjoint(elems) == elems
-    //  for (qindex r=0; r<dim; r++)
-    //      for (qindex c=0; c<r; c++)
-    //          if (!isApprox(elems[r][c], std::conj(elems[c][r]), eps))
-    //              return false;
+//     // check adjoint(elems) == elems
+//     //  for (qindex r=0; r<dim; r++)
+//     //      for (qindex c=0; c<r; c++)
+//     //          if (!isApprox(elems[r][c], std::conj(elems[c][r]), eps))
+//     //              return false;
 
-    //  return true;
-}
+//     //  return true;
+// }
 
-bool getHermiticityButFaster(qcomp *diags, qindex dim, qreal eps)
+bool getHermiticity(qcomp *diags, qindex dim, qreal eps)
 {
     assert_utilsGivenNonZeroEpsilon(eps);
 
@@ -781,23 +718,23 @@ bool getHermiticityButFaster(qcomp *diags, qindex dim, qreal eps)
     return isHermitian;
 }
 
-// diagonal version doesn't need templating because array decays to pointer, yay!
-bool getHermiticity(qcomp *diags, qindex dim, qreal eps)
-{
-    assert_utilsGivenNonZeroEpsilon(eps);
+// // diagonal version doesn't need templating because array decays to pointer, yay!
+// bool getHermiticity(qcomp *diags, qindex dim, qreal eps)
+// {
+//     assert_utilsGivenNonZeroEpsilon(eps);
 
-    /// @todo
-    /// consider multithreading or GPU-accelerating this
-    /// when caller is big and e.g. has GPU memory
-    return getHermiticityButFaster(diags, dim, eps);
+//     /// @todo
+//     /// consider multithreading or GPU-accelerating this
+//     /// when caller is big and e.g. has GPU memory
+//     return getHermiticityButFaster(diags, dim, eps);
 
-    // check every element has a zero (or <eps) imaginary component
-    //  for (qindex i=0; i<dim; i++)
-    //      if (!isApprox(std::imag(diags[i]), 0, eps))
-    //          return false;
+//     // check every element has a zero (or <eps) imaginary component
+//     //  for (qindex i=0; i<dim; i++)
+//     //      if (!isApprox(std::imag(diags[i]), 0, eps))
+//     //          return false;
 
-    //  return true;
-}
+//     //  return true;
+// }
 
 // hermiticity of fixed-size matrices is always computed afresh
 bool util_isHermitian(CompMatr1 m, qreal eps) { return getHermiticity(m.elems, m.numRows, eps); }
@@ -845,7 +782,7 @@ bool util_isHermitian(FullStateDiagMatr m, qreal eps)
  * EXPONENTIABLE MATRIX IS NON-ZERO
  */
 
-bool getWhetherNonZeroButFaster(qcomp *diags, qindex dim, qreal eps)
+bool getWhetherNonZero(qcomp *diags, qindex dim, qreal eps)
 {
     assert_utilsGivenNonZeroEpsilon(eps);
 
@@ -888,39 +825,38 @@ bool getWhetherNonZeroButFaster(qcomp *diags, qindex dim, qreal eps)
     return allNonZero;
 }
 
-bool getWhetherNonZero(qcomp *diags, qindex dim, qreal eps)
-{
-    //  assert_utilsGivenNonZeroEpsilon(eps);
+// bool getWhetherNonZero(qcomp *diags, qindex dim, qreal eps)
+// {
+//     //  assert_utilsGivenNonZeroEpsilon(eps);
 
-    //  /// @todo
-    //  /// consider multithreading or GPU-accelerating this
-    //  /// when caller is big and e.g. has GPU memory
-    return getWhetherNonZeroButFaster(diags, dim, eps);
+//     //  /// @todo
+//     //  /// consider multithreading or GPU-accelerating this
+//     //  /// when caller is big and e.g. has GPU memory
 
-    //  for (qindex i=0; i<dim; i++) {
+//     //  for (qindex i=0; i<dim; i++) {
 
-    //      // check each complex element has non-zero abs
-    //      if (isApprox(std::abs(diags[i]), 0, eps))
-    //          return false;
+//     //      // check each complex element has non-zero abs
+//     //      if (isApprox(std::abs(diags[i]), 0, eps))
+//     //          return false;
 
-    //      // note that calc-expec functions which assume
-    //      // hermiticity will only consult the real component,
-    //      // so its magnitude alone should determine divergence.
-    //      // But alas an elem = eps*i will pass the above validation
-    //      // yet also be validly Hermitian (imag <= eps), and cause
-    //      // real(elem)=0 to be accepted within the matrix. This
-    //      // will cause a divergence or divison-by-zero error when
-    //      // the matrix is raised to a negative exponent; as this
-    //      // function was supposed to detect and prevent! Fixing
-    //      // this thoroughly would necessitate creating another
-    //      // matrix field, separating when .absIsApproxNonZero and
-    //      // .realIsApproxNonZero. But this is revolting and we
-    //      // simply accept the above strange scenario as a
-    //      // non-validated dge-case.
-    //  }
+//     //      // note that calc-expec functions which assume
+//     //      // hermiticity will only consult the real component,
+//     //      // so its magnitude alone should determine divergence.
+//     //      // But alas an elem = eps*i will pass the above validation
+//     //      // yet also be validly Hermitian (imag <= eps), and cause
+//     //      // real(elem)=0 to be accepted within the matrix. This
+//     //      // will cause a divergence or divison-by-zero error when
+//     //      // the matrix is raised to a negative exponent; as this
+//     //      // function was supposed to detect and prevent! Fixing
+//     //      // this thoroughly would necessitate creating another
+//     //      // matrix field, separating when .absIsApproxNonZero and
+//     //      // .realIsApproxNonZero. But this is revolting and we
+//     //      // simply accept the above strange scenario as a
+//     //      // non-validated dge-case.
+//     //  }
 
-    //  return true;
-}
+//     //  return true;
+// }
 
 /*
  * EXPONENTIABLE MATRIX IS NON-ZERO
@@ -959,7 +895,7 @@ bool util_isApproxNonZero(FullStateDiagMatr matrix, qreal eps)
  * EXPONENTIABLE MATRIX IS NON-NEGATIVE
  */
 
-bool getWhetherRealsAreStrictlyNonNegativeButFaster(qcomp *diags, qindex dim)
+bool getWhetherRealsAreStrictlyNonNegative(qcomp *diags, qindex dim)
 {
 
     /// @todo
@@ -986,32 +922,31 @@ bool getWhetherRealsAreStrictlyNonNegativeButFaster(qcomp *diags, qindex dim)
     return allNonNeg;
 }
 
-bool getWhetherRealsAreStrictlyNonNegative(qcomp *diags, qindex dim)
-{
+// bool getWhetherRealsAreStrictlyNonNegative(qcomp *diags, qindex dim)
+// {
 
-    /// @todo
-    /// consider multithreading or GPU-accelerating this
-    /// when caller is big and e.g. has GPU memory
+//     /// @todo
+//     /// consider multithreading or GPU-accelerating this
+//     /// when caller is big and e.g. has GPU memory
 
-    return getWhetherRealsAreStrictlyNonNegativeButFaster(diags, dim);
 
-    // it may seem like this function should be combined with
-    // getWhetherRealsAreApproxNonZero() above, or indeed with
-    // getHermiticity(), since all three are relevant to vali-
-    // dation of diagonl matrices which can be exponentiated.
-    // Alas, such as design is complicated by this particular
-    // property (non-negativeness) being independent of the
-    // validation epsilon. For example, sometimes it needs to
-    // be computed even when numerical validation is disabled,
-    // and does not need recomputing with the epsilon changes.
+//     // it may seem like this function should be combined with
+//     // getWhetherRealsAreApproxNonZero() above, or indeed with
+//     // getHermiticity(), since all three are relevant to vali-
+//     // dation of diagonl matrices which can be exponentiated.
+//     // Alas, such as design is complicated by this particular
+//     // property (non-negativeness) being independent of the
+//     // validation epsilon. For example, sometimes it needs to
+//     // be computed even when numerical validation is disabled,
+//     // and does not need recomputing with the epsilon changes.
 
-    // check every real component is strictly >= 0
-    //  for (qindex i=0; i<dim; i++)
-    //      if (std::real(diags[i]) < 0)
-    //          return false;
+//     // check every real component is strictly >= 0
+//     //  for (qindex i=0; i<dim; i++)
+//     //      if (std::real(diags[i]) < 0)
+//     //          return false;
 
-    //  return true;
-}
+//     //  return true;
+// }
 
 // non-negativity of fixed-size matrices is always computed afresh
 bool util_isStrictlyNonNegative(DiagMatr1 m) { return getWhetherRealsAreStrictlyNonNegative(m.elems, m.numElems); }
@@ -1107,7 +1042,7 @@ bool util_isCPTP(KrausMap map, qreal eps)
 
 // T can be qcomp*** or vector<vector<vector<qcomp>>>
 template <typename T>
-void setSuperoperatorButFaster(qcomp **superop, T matrices, int numMatrices, qindex logMatrixDim)
+void setSuperoperator(qcomp **superop, T matrices, int numMatrices, qindex logMatrixDim)
 {
     qindex matrixDim = powerOf2(logMatrixDim);
     qindex superopDim = matrixDim * matrixDim;
@@ -1144,42 +1079,42 @@ void setSuperoperatorButFaster(qcomp **superop, T matrices, int numMatrices, qin
     }
 }
 
-// T can be qcomp*** or vector<vector<vector<qcomp>>>
-template <typename T>
-void setSuperoperator(qcomp **superop, T matrices, int numMatrices, qindex logMatrixDim)
-{
+// // T can be qcomp*** or vector<vector<vector<qcomp>>>
+// template <typename T>
+// void setSuperoperator(qcomp **superop, T matrices, int numMatrices, qindex logMatrixDim)
+// {
 
-    /// @todo
-    /// we initialise the superoperator completely serially, under the assumption that the
-    /// superoperator will be small in size and initialised infrequently. Still, it would
-    /// be better to provide backend initialisation functions (OpenMP and CUDA accelerated),
-    /// called when the superoperator size is above some threshold!
+//     /// @todo
+//     /// we initialise the superoperator completely serially, under the assumption that the
+//     /// superoperator will be small in size and initialised infrequently. Still, it would
+//     /// be better to provide backend initialisation functions (OpenMP and CUDA accelerated),
+//     /// called when the superoperator size is above some threshold!
 
-    setSuperoperatorButFaster(superop, matrices, numMatrices, logMatrixDim);
+//     setSuperoperatorButFaster(superop, matrices, numMatrices, logMatrixDim);
 
-    //  qindex matrixDim = powerOf2(logMatrixDim);
-    //  qindex superopDim = matrixDim * matrixDim;
+//     //  qindex matrixDim = powerOf2(logMatrixDim);
+//     //  qindex superopDim = matrixDim * matrixDim;
 
-    //  // clear superoperator
-    //  for (qindex r=0; r<superopDim; r++)
-    //      for (qindex c=0; c<superopDim; c++)
-    //          superop[r][c] = 0;
+//     //  // clear superoperator
+//     //  for (qindex r=0; r<superopDim; r++)
+//     //      for (qindex c=0; c<superopDim; c++)
+//     //          superop[r][c] = 0;
 
-    //  // add each matrix's contribution to the superoperator
-    //  for (int n=0; n<numMatrices; n++) {
-    //      auto matrix = matrices[n];
+//     //  // add each matrix's contribution to the superoperator
+//     //  for (int n=0; n<numMatrices; n++) {
+//     //      auto matrix = matrices[n];
 
-    //      // superop += conj(matrix) (tensor) matrix
-    //      for (qindex i=0; i<matrixDim; i++)
-    //          for (qindex j=0; j<matrixDim; j++)
-    //              for (qindex k=0; k<matrixDim; k++)
-    //                  for (qindex l=0; l<matrixDim; l++) {
-    //                      qindex r = i*matrixDim + k;
-    //                      qindex c = j*matrixDim + l;
-    //                      superop[r][c] += std::conj(matrix[i][j]) * matrix[k][l];
-    //                  }
-    //  }
-}
+//     //      // superop += conj(matrix) (tensor) matrix
+//     //      for (qindex i=0; i<matrixDim; i++)
+//     //          for (qindex j=0; j<matrixDim; j++)
+//     //              for (qindex k=0; k<matrixDim; k++)
+//     //                  for (qindex l=0; l<matrixDim; l++) {
+//     //                      qindex r = i*matrixDim + k;
+//     //                      qindex c = j*matrixDim + l;
+//     //                      superop[r][c] += std::conj(matrix[i][j]) * matrix[k][l];
+//     //                  }
+//     //  }
+// }
 
 void util_setSuperoperator(qcomp **superop, vector<vector<vector<qcomp>>> matrices, int numMatrices, int numQubits)
 {
